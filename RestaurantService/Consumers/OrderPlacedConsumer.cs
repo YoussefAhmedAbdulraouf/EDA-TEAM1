@@ -1,5 +1,6 @@
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using Microsoft.Extensions.Hosting;
 using RestaurantService.Events;
 using RestaurantService.Services;
 using System.Text.Json;

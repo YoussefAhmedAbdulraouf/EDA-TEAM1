@@ -2,6 +2,7 @@ using Amazon.SQS;
 using Amazon.SQS.Model;
 using DeliveryService.Events;
 using DeliveryService.Services;
+using Microsoft.Extensions.Hosting;
 using System.Text.Json;
 
 namespace DeliveryService.Consumers;

@@ -1,5 +1,6 @@
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using Microsoft.Extensions.Hosting;
 using NotificationService.Events;
 using System.Text.Json;
 
