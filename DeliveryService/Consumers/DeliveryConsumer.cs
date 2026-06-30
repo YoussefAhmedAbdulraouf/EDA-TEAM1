@@ -51,7 +51,7 @@ public class DeliveryConsumer : BackgroundService
                 WaitTimeSeconds = 20
             }, stoppingToken);
 
-            // RECOMMENDATION: Guard against null responses or empty message pools safely
+            // Guard against null responses or empty message pools safely
             if (response?.Messages == null || response.Messages.Count == 0)
             {
                 continue;
@@ -71,7 +71,7 @@ public class DeliveryConsumer : BackgroundService
 
                     var envelope = JsonSerializer.Deserialize<SnsEnvelope>(msg.Body);
 
-                    // 1. Ensure the envelope itself isn't null
+                    // Ensure the envelope itself isn't null
                     if (envelope == null)
                     {
                         _logger.LogWarning("Received a message that couldn't be deserialized into an SnsEnvelope.");
@@ -79,7 +79,7 @@ public class DeliveryConsumer : BackgroundService
                         continue;
                     }
 
-                    // 2. Safely check if the EventType key exists in the dictionary
+                    // Safely check if the EventType key exists in the dictionary
                     string? eventType = null;
                     if (envelope.MessageAttributes != null && 
                         envelope.MessageAttributes.TryGetValue("EventType", out var attribute))
@@ -87,7 +87,7 @@ public class DeliveryConsumer : BackgroundService
                         eventType = attribute?.Value;
                     }
 
-                    // 3. If eventType is null, log it and move on instead of crashing
+                    // If eventType is null, log it and move on instead of crashing
                     if (string.IsNullOrEmpty(eventType))
                     {
                         _logger.LogWarning("Received message {MessageId} missing 'EventType' attribute. Body snippet: {Body}", 
@@ -102,23 +102,32 @@ public class DeliveryConsumer : BackgroundService
                         case "OrderPlaced":
                             if (envelope.Message != null)
                             {
+                                // Deserialize as OrderPlaced
                                 var orderPlaced = JsonSerializer.Deserialize<OrderPlaced>(envelope.Message);
                                 if (orderPlaced != null)
                                 {
+                                    // Store the delivery address in _orderAddresses dictionary
                                     _orderAddresses[orderPlaced.OrderId] = orderPlaced.DeliveryAddress;
+
+                                    // Log: "[Delivery] Saved address for order {OrderId}"
                                     _logger.LogInformation("[Delivery] Saved address for order {OrderId}", orderPlaced.OrderId);
                                 }
+
+                                // Do NOT publish anything - just save for later
                             }
                             break;
 
                         case "OrderAccepted":
                             if (envelope.Message != null)
                             {
+                                // Deserialize as OrderAccepted
                                 var orderAccepted = JsonSerializer.Deserialize<OrderAccepted>(envelope.Message);
                                 if (orderAccepted != null)
                                 {
+                                    // Look up the address: _orderAddresses.TryGetValue(...)
                                     if (_orderAddresses.TryGetValue(orderAccepted.OrderId, out var address))
                                     {
+                                        // Log: "[Delivery] Looking for a driver near {address}..."
                                         _logger.LogInformation("[Delivery] Looking for a driver near {address}...", address);
                                     }
                                     else
@@ -146,7 +155,7 @@ public class DeliveryConsumer : BackgroundService
 
                                     await _publisher.PublishAsync(driverAssignedEvent);
 
-                                    // PRODUCTION TIP: Clean up storage so memory doesn't leak over days of operation
+                                    // Clean up storage so memory doesn't leak over days of operation
                                     _orderAddresses.Remove(orderAccepted.OrderId);
                                 }
                             }
