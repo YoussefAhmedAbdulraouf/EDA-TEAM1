@@ -32,7 +32,7 @@ public class NotificationConsumer : BackgroundService
                 WaitTimeSeconds = 20
             }, stoppingToken);
 
-            foreach (var msg in response.Messages)
+            foreach (var msg in response?.Messages?? [])
             {
                 try
                 {
@@ -64,6 +64,42 @@ public class NotificationConsumer : BackgroundService
                     //   OrderCancelled -> "Your order has been cancelled. Reason: {Reason}"
                     //
                     // Use _logger.LogInformation for the messages so they show in the console.
+
+                    string? eventType = null;
+                    if (envelope?.MessageAttributes != null && envelope.MessageAttributes.TryGetValue("EventType", out var attribute))
+                    {
+                        eventType = attribute.Value;
+                    }
+
+                    if (!string.IsNullOrEmpty(eventType) && !string.IsNullOrEmpty(envelope?.Message))
+                    {
+                        switch (eventType)
+                        {
+                            case nameof(OrderPlaced):
+                                var placed = JsonSerializer.Deserialize<OrderPlaced>(envelope.Message);
+                                if (placed != null) _logger.LogInformation("Dear {Name}, your order has been received!", placed.CustomerName);
+                                break;
+                            case nameof(OrderAccepted):
+                                var accepted = JsonSerializer.Deserialize<OrderAccepted>(envelope.Message);
+                                if (accepted != null) _logger.LogInformation("Great news! {Restaurant} is preparing your food. ETA: {X} min.", accepted.RestaurantName, accepted.EstimatedPrepTimeMinutes);
+                                break;
+                            case nameof(OrderRejected):
+                                var rejected = JsonSerializer.Deserialize<OrderRejected>(envelope.Message);
+                                if (rejected != null) _logger.LogInformation("Sorry, your order was declined by the restaurant. Reason: {Reason}", rejected.Reason);
+                                break;
+                            case nameof(DriverAssigned):
+                                var driverAssigned = JsonSerializer.Deserialize<DriverAssigned>(envelope.Message);
+                                if (driverAssigned != null) _logger.LogInformation("Your driver {Name} is on the way! ETA: {X} min. Contact: {Phone}", driverAssigned.DriverName, driverAssigned.EstimatedDeliveryMinutes, driverAssigned.DriverPhone);
+                                break;
+                            case nameof(OrderCancelled):
+                                var cancelled = JsonSerializer.Deserialize<OrderCancelled>(envelope.Message);
+                                if (cancelled != null) _logger.LogInformation("Your order has been cancelled. Reason: {Reason}", cancelled.Reason);
+                                break;
+                            default:
+                                _logger.LogWarning("Unknown EventType: {EventType}", eventType);
+                                break;
+                        }
+                    }
 
                     await _sqs.DeleteMessageAsync(_queueUrl, msg.ReceiptHandle, stoppingToken);
                 }
