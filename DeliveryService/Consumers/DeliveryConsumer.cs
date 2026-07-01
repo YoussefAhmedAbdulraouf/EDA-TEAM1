@@ -2,6 +2,8 @@ using Amazon.SQS;
 using Amazon.SQS.Model;
 using DeliveryService.Events;
 using DeliveryService.Services;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
 namespace DeliveryService.Consumers;
@@ -49,45 +51,126 @@ public class DeliveryConsumer : BackgroundService
                 WaitTimeSeconds = 20
             }, stoppingToken);
 
+            // Guard against null responses or empty message pools safely
+            if (response?.Messages == null || response.Messages.Count == 0)
+            {
+                continue;
+            }
+
             foreach (var msg in response.Messages)
             {
                 try
                 {
+                    // Ensure the individual message body has content
+                    if (string.IsNullOrWhiteSpace(msg.Body))
+                    {
+                        _logger.LogWarning("Received empty message body for MessageId: {MessageId}", msg.MessageId);
+                        await _sqs.DeleteMessageAsync(_queueUrl, msg.ReceiptHandle, stoppingToken);
+                        continue;
+                    }
+
                     var envelope = JsonSerializer.Deserialize<SnsEnvelope>(msg.Body);
 
-                    // TODO: Determine the event type and handle accordingly.
-                    //
-                    // Use the MessageAttributes from the SNS envelope:
-                    //   var eventType = envelope.MessageAttributes?["EventType"]?.Value;
-                    //
-                    // Then switch on eventType:
-                    //
-                    // CASE "OrderPlaced":
-                    //   - Deserialize as OrderPlaced
-                    //   - Store the delivery address in _orderAddresses dictionary:
-                    //     _orderAddresses[orderPlaced.OrderId] = orderPlaced.DeliveryAddress;
-                    //   - Log: "[Delivery] Saved address for order {OrderId}"
-                    //   - Do NOT publish anything — just save for later.
-                    //
-                    // CASE "OrderAccepted":
-                    //   - Deserialize as OrderAccepted
-                    //   - Look up the address: _orderAddresses.TryGetValue(...)
-                    //   - Log: "[Delivery] Looking for a driver near {address}..."
-                    //   - Simulate search: await Task.Delay(TimeSpan.FromSeconds(6))
-                    //   - Pick a random driver:
-                    //     var driver = _drivers[Random.Shared.Next(_drivers.Count)];
-                    //   - Log: "[Delivery] Driver {Name} assigned to order {OrderId}"
-                    //   - Publish a DriverAssigned event with:
-                    //     DriverId: Guid.NewGuid()
-                    //     DriverName: driver.Name
-                    //     DriverPhone: driver.Phone
-                    //     EstimatedDeliveryMinutes: Random.Shared.Next(15, 35)
+                    // Ensure the envelope itself isn't null
+                    if (envelope == null)
+                    {
+                        _logger.LogWarning("Received a message that couldn't be deserialized into an SnsEnvelope.");
+                        await _sqs.DeleteMessageAsync(_queueUrl, msg.ReceiptHandle, stoppingToken);
+                        continue;
+                    }
+
+                    // Safely check if the EventType key exists in the dictionary
+                    string? eventType = null;
+                    if (envelope.MessageAttributes != null && 
+                        envelope.MessageAttributes.TryGetValue("EventType", out var attribute))
+                    {
+                        eventType = attribute?.Value;
+                    }
+
+                    // If eventType is null, log it and move on instead of crashing
+                    if (string.IsNullOrEmpty(eventType))
+                    {
+                        _logger.LogWarning("Received message {MessageId} missing 'EventType' attribute. Body snippet: {Body}", 
+                            msg.MessageId, msg.Body.Length > 100 ? msg.Body[..100] : msg.Body);
+                        
+                        await _sqs.DeleteMessageAsync(_queueUrl, msg.ReceiptHandle, stoppingToken);
+                        continue; 
+                    }
+
+                    switch (eventType)
+                    {
+                        case "OrderPlaced":
+                            if (envelope.Message != null)
+                            {
+                                // Deserialize as OrderPlaced
+                                var orderPlaced = JsonSerializer.Deserialize<OrderPlaced>(envelope.Message);
+                                if (orderPlaced != null)
+                                {
+                                    // Store the delivery address in _orderAddresses dictionary
+                                    _orderAddresses[orderPlaced.OrderId] = orderPlaced.DeliveryAddress;
+
+                                    // Log: "[Delivery] Saved address for order {OrderId}"
+                                    _logger.LogInformation("[Delivery] Saved address for order {OrderId}", orderPlaced.OrderId);
+                                }
+
+                                // Do NOT publish anything - just save for later
+                            }
+                            break;
+
+                        case "OrderAccepted":
+                            if (envelope.Message != null)
+                            {
+                                // Deserialize as OrderAccepted
+                                var orderAccepted = JsonSerializer.Deserialize<OrderAccepted>(envelope.Message);
+                                if (orderAccepted != null)
+                                {
+                                    // Look up the address: _orderAddresses.TryGetValue(...)
+                                    if (_orderAddresses.TryGetValue(orderAccepted.OrderId, out var address))
+                                    {
+                                        // Log: "[Delivery] Looking for a driver near {address}..."
+                                        _logger.LogInformation("[Delivery] Looking for a driver near {address}...", address);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("[Delivery] OrderPlaced missing! Address unknown for order {OrderId}. Proceeding anyway...", orderAccepted.OrderId);
+                                        address = "Unknown Address";
+                                    }
+
+                                    // Simulate searching for a driver
+                                    await Task.Delay(TimeSpan.FromSeconds(6), stoppingToken);
+
+                                    // Pick a random driver
+                                    var driver = _drivers[Random.Shared.Next(_drivers.Count)];
+                                    _logger.LogInformation("[Delivery] Driver {Name} assigned to order {OrderId}", driver.Name, orderAccepted.OrderId);
+
+                                    // Publish DriverAssigned event
+                                    var driverAssignedEvent = new DriverAssigned(
+                                        OrderId: orderAccepted.OrderId,
+                                        DriverId: Guid.NewGuid(),
+                                        DriverName: driver.Name,
+                                        DriverPhone: driver.Phone,
+                                        EstimatedDeliveryMinutes: Random.Shared.Next(15, 35),
+                                        OccurredAt: DateTime.UtcNow
+                                    );
+
+                                    await _publisher.PublishAsync(driverAssignedEvent);
+
+                                    // Clean up storage so memory doesn't leak over days of operation
+                                    _orderAddresses.Remove(orderAccepted.OrderId);
+                                }
+                            }
+                            break;
+
+                        default:
+                            _logger.LogWarning("Unknown or unhandled event type: {EventType}", eventType);
+                            break;
+                    }
 
                     await _sqs.DeleteMessageAsync(_queueUrl, msg.ReceiptHandle, stoppingToken);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to process message");
+                    _logger.LogError(ex, "Failed to process message {MessageId}", msg.MessageId);
                 }
             }
         }

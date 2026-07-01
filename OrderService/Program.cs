@@ -25,9 +25,10 @@ builder.Services.AddControllers();
 var app = builder.Build();
 
 app.MapControllers();
+app.UseRouting();
 
 Console.WriteLine("===========================================");
 Console.WriteLine("  ORDER SERVICE — Listening on port 5000");
 Console.WriteLine("===========================================");
 
-app.Run("http://localhost:5000");
+app.Run();

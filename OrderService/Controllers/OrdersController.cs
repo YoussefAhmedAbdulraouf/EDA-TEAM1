@@ -27,12 +27,26 @@ public class OrdersController : ControllerBase
         // In a real system, you'd save to a database here.
         // For this lab, we just publish the event.
 
-        // TODO: Create the OrderPlaced event with the data from the request
-        // TODO: Publish the event using _publisher.PublishAsync(...)
-        // TODO: Log to the console so you can see it working
-        // TODO: Return Accepted (HTTP 202) with the OrderId
+        // Create the OrderPlaced event with the data from the request
+        var orderPlaced = new OrderPlaced(
+            OrderId: orderId,
+            CustomerId: request.CustomerId,
+            CustomerName: request.CustomerName,
+            CustomerPhone: request.CustomerPhone,
+            DeliveryAddress: request.DeliveryAddress,
+            Items: request.Items,
+            TotalAmount: request.Items.Sum(i => i.Quantity * i.UnitPrice),
+            OccurredAt: DateTime.UtcNow
+        );
 
-        throw new NotImplementedException("Implement the PlaceOrder method!");
+        // Publish the event using _publisher.PublishAsync(...)
+        await _publisher.PublishAsync(orderPlaced);
+
+        // Log to the console so you can see it working
+        Console.WriteLine($"[OrderService] OrderPlaced event published — OrderId: {orderId}, Customer: {request.CustomerName}, Total: {orderPlaced.TotalAmount:C}");
+
+        // Return Accepted (HTTP 202) with the OrderId
+        return Accepted(new { OrderId = orderId });
     }
 
     /// <summary>
@@ -42,12 +56,21 @@ public class OrdersController : ControllerBase
     [HttpDelete("{orderId}")]
     public async Task<IActionResult> CancelOrder(Guid orderId, [FromBody] CancelOrderRequest request)
     {
-        // TODO: Create the OrderCancelled event
-        // TODO: Publish the event
-        // TODO: Log to the console
-        // TODO: Return Ok with the OrderId and Status
+        // Create the OrderCancelled event
+        var orderCancelled = new OrderCancelled(
+            OrderId: orderId,
+            Reason: request.Reason,
+            OccurredAt: DateTime.UtcNow
+        );
 
-        throw new NotImplementedException("Implement the CancelOrder method!");
+        // Publish the event
+        await _publisher.PublishAsync(orderCancelled);
+
+        // Log to the console
+        Console.WriteLine($"[OrderService] OrderCancelled event published — OrderId: {orderId}, Reason: {request.Reason}");
+
+        // Return Ok with the OrderId and Status
+        return Ok(new { OrderId = orderId, Status = "Cancelled" });
     }
 }
 
