@@ -9,10 +9,13 @@ namespace OrderService.Controllers;
 public class OrdersController : ControllerBase
 {
     private readonly EventPublisher _publisher;
+    private readonly ILogger<OrdersController> _logger;
 
-    public OrdersController(EventPublisher publisher)
+    public OrdersController(EventPublisher publisher, ILogger<OrdersController> logger)
     {
         _publisher = publisher;
+        _logger = logger;
+
     }
 
     /// <summary>
@@ -43,7 +46,7 @@ public class OrdersController : ControllerBase
         await _publisher.PublishAsync(orderPlaced);
 
         // Log to the console so you can see it working
-        Console.WriteLine($"[OrderService] OrderPlaced event published — OrderId: {orderId}, Customer: {request.CustomerName}, Total: {orderPlaced.TotalAmount:C}");
+        _logger.LogInformation("OrderPlaced event published. OrderId: {OrderId}, Customer: {CustomerName}, Total: {TotalAmount}", orderId, request.CustomerName, orderPlaced.TotalAmount);
 
         // Return Accepted (HTTP 202) with the OrderId
         return Accepted(new { OrderId = orderId });
