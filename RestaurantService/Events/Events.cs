@@ -43,4 +43,11 @@ public record SnsEnvelope
     public string Message { get; init; } = "";
     public string MessageId { get; init; } = "";
     public string Type { get; init; } = "";
+    public Dictionary<string, SnsMessageAttribute>? MessageAttributes { get; init; }
+}
+
+public record SnsMessageAttribute
+{
+    public string Type { get; init; } = "";
+    public string Value { get; init; } = "";
 }
